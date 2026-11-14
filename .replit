@@ -1,0 +1,15 @@
+modules = ["python-3.11", "nodejs-20"]
+run = "bash run.sh"
+
+[nix]
+channel = "stable-24_05"
+packages = ["tesseract"]
+
+[deployment]
+deploymentTarget = "vm"
+build = ["bash", "build.sh"]
+run = ["bash", "run.sh"]
+
+[[ports]]
+localPort = 8000
+externalPort = 80

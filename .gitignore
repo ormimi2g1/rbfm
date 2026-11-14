@@ -1,0 +1,12 @@
+# Never commit company data: bills, NetSuite exports, databases
+data/
+private/
+*.pdf
+*.xlsx
+*.csv
+*.zip
+.env
+__pycache__/
+.pytest_cache/
+node_modules/
+frontend/dist/
