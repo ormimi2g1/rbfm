@@ -26,6 +26,7 @@ Replit (`DATABASE_URL`), SQLite locally.
 | Flags and variances are computed on read, not stored | Re-runs are idempotent; a new snapshot, alias, bucket rule or threshold applies immediately. |
 | Shipment-ID fixes are suggested, never auto-applied | The ID is typed by hand; a wrong automatic match would put cost on the wrong shipment. Confirmed fixes are stored as aliases. |
 | "Main freight bill missing" suppresses the variance flag | A shipment with only a drayage or storage bill loaded is not final; comparing it would raise false over-landed alarms. |
+| SKU lines are read cell by cell and checked against the printed Line Total | Whole-page OCR dropped decimal points and misread codes; one cell at a time with a restricted character set, rendered with poppler, tied to the cent on a real report. |
 | Single shared password | v1 is for one small team. Roles come later. |
 
 ## Data model
@@ -34,6 +35,8 @@ Replit (`DATABASE_URL`), SQLite locally.
 |---|---|
 | `bill` | One uploaded PDF: forwarder, invoice, mode, PO numbers, printed total, tie result, how it was read, the shipment ID as written |
 | `bill_charge` | Charge lines: description, type, units, rate, FX, USD total, page |
+| `bill_item_line` | SKU lines read from the broker's Invoice Lines Report: SKU, quantity, invoice value, HTS, duty rate, page |
+| `ibs_map` | Item receipt → shipment ID lookup, used when the receipt report has no shipment ID |
 | `ns_snapshot` | One NetSuite load (report or API) with counts, including receipts that carry no shipment ID |
 | `ns_shipment` | Per snapshot, per shipment ID *as written*: goods value, landed freight, landed customs, POs, receipt count |
 | `item_receipt` | Report path detail rows |

@@ -9,7 +9,7 @@ from collections import defaultdict
 from sqlalchemy.orm import Session
 
 from . import buckets, ids
-from .models import Alias, Bill, IbsItem, ItemReceipt
+from .models import Alias, Bill, BillItemLine, IbsItem, ItemReceipt
 from .netsuite import store
 
 COUNTED = ("parsed", "needs_review")
@@ -63,6 +63,7 @@ def bill_view(b: Bill, rules) -> dict:
         "is_rebill": b.is_rebill, "freight": _r(freight), "customs": _r(customs + (b.stated_customs or 0)),
         "broker_fees": _r(broker), "stated_customs": b.stated_customs, "has_main_freight": has_main, "charges": lines,
         "created_at": b.created_at.isoformat() if b.created_at else None,
+        "items_status": b.items_status, "items_printed_total": b.items_printed_total,
     }
 
 
@@ -216,7 +217,7 @@ def shipment_detail(db: Session, sid: str) -> dict | None:
     if not s:
         return None
     snap = state["snapshot"]
-    s = dict(s, flag_text={f: FLAG_TEXT.get(f, f) for f in s["flags"]}, receipts_detail=[], sku_rows=[])
+    s = dict(s, flag_text={f: FLAG_TEXT.get(f, f) for f in s["flags"]}, receipts_detail=[], sku_rows=[], sku_lines=None)
     if snap:
         for r in db.query(ItemReceipt).filter(ItemReceipt.snapshot_id == snap.id, ItemReceipt.ibs_norm == sid).order_by(ItemReceipt.receipt_date, ItemReceipt.doc_number):
             s["receipts_detail"].append({"doc_number": r.doc_number, "date": r.receipt_date.isoformat() if r.receipt_date else None, "po": r.po,
@@ -224,7 +225,58 @@ def shipment_detail(db: Session, sid: str) -> dict | None:
                                          "freight_pct": round(100 * r.freight / r.goods_value, 2) if r.goods_value else None})
         items = db.query(IbsItem).filter(IbsItem.snapshot_id == snap.id, IbsItem.ibs_norm == sid).all()
         s["sku_rows"] = sku_rows(items, s)
+    bill_ids = [b["id"] for b in s["bills"] if b["status"] in COUNTED and not b["excluded"]]
+    lines = db.query(BillItemLine).filter(BillItemLine.bill_id.in_(bill_ids)).order_by(BillItemLine.bill_id, BillItemLine.line_no).all() if bill_ids else []
+    s["sku_lines"] = sku_allocation(lines, s)
     return s
+
+
+def _spread(total: float, weights: list[float]) -> list[float]:
+    """Split `total` by weight into cents that add back to exactly `total`."""
+    wsum = sum(weights)
+    if not wsum:
+        return [0.0] * len(weights)
+    cents = round(total * 100)
+    raw = [cents * w / wsum for w in weights]
+    out = [int(x // 1) for x in raw]
+    order = sorted(range(len(raw)), key=lambda i: raw[i] - out[i], reverse=True)
+    for i in order[: cents - sum(out)]:
+        out[i] += 1
+    return [c / 100 for c in out]
+
+
+def sku_allocation(lines, s: dict) -> dict | None:
+    """Spread the shipment's billed and NetSuite-landed freight over the SKU lines
+    of the broker's Invoice Lines Report, by invoice value (NetSuite's VALUE
+    method). The SKU variances add up exactly to the shipment variance."""
+    if not lines:
+        return None
+    skus: dict[str, dict] = {}
+    for l in lines:
+        d = skus.setdefault(l.sku, {"sku": l.sku, "description": l.description, "qty": 0.0, "value": 0.0, "hts": [], "duty_rate": [],
+                                    "lines": [], "pages": [], "notes": []})
+        if not l.component:
+            d["qty"] += l.qty or 0          # a set split into two customs lines is still one quantity
+        d["value"] += l.value_usd or 0
+        d["lines"].append(l.line_no)
+        for key, val in (("hts", l.hts), ("duty_rate", l.duty_rate), ("pages", l.page), ("notes", l.note)):
+            if val and val not in d[key]:
+                d[key].append(val)
+    rows = list(skus.values())
+    weights = [r["value"] for r in rows]
+    billed = _spread(s["actual_freight"], weights)
+    landed = _spread(s["ns_freight"], weights)
+    for r, b, n in zip(rows, billed, landed):
+        r["value"] = _r(r["value"])
+        r["billed_freight"], r["ns_freight"], r["variance"] = b, n, _r(n - b)
+        r["variance_per_unit"] = round((n - b) / r["qty"], 4) if r["qty"] else None
+        r["hts"], r["duty_rate"] = ", ".join(r["hts"]), ", ".join(r["duty_rate"])
+        r["note"] = "; ".join(r.pop("notes")) or None
+    total_value = _r(sum(weights))
+    return {"rows": rows, "sku_count": len(rows), "line_count": len(lines), "invoice_value": total_value,
+            "billed_freight": _r(sum(billed)), "ns_freight": _r(sum(landed)), "variance": _r(sum(landed) - sum(billed)),
+            "goods_value_netsuite": s["goods_value"], "value_gap": _r(total_value - s["goods_value"]),
+            "final": s["status"] == "matched"}
 
 
 def sku_rows(items, s: dict) -> list[dict]:

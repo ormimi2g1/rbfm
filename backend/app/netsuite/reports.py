@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from sqlalchemy.orm import Session
 
 from ..ids import normalise
-from ..models import ItemReceipt, NsShipment, NsSnapshot
+from ..models import IbsMap, ItemReceipt, NsShipment, NsSnapshot
 from . import store
 
 COLUMNS = {  # our field -> accepted header spellings (lower-case)
@@ -59,6 +59,27 @@ def _d(v) -> date | None:
     return None
 
 
+def import_ibs_map(db: Session, data: bytes, filename: str) -> int:
+    """The lookup report: one row per item receipt with its shipment ID."""
+    rows = _rows(data, filename)
+    header = [str(h or "").strip().lower() for h in (next(rows, None) or [])]
+    ibs_col = next((i for i, h in enumerate(header) if "shipment" in h or h == "ibs"), None)
+    ir_col = next((i for i, h in enumerate(header) if h.startswith("ir") or "document" in h or "receipt" in h), None)
+    if ibs_col is None or ir_col is None:
+        raise ReportError("Expected two columns: the shipment ID and the item receipt number (IR#).")
+    pairs = {}
+    for r in rows:
+        ibs, ir = str(r[ibs_col] or "").strip(), str(r[ir_col] or "").strip()
+        if ibs and ir.upper().startswith("IR"):
+            pairs[ir] = ibs
+    if not pairs:
+        raise ReportError("No item receipt numbers found in that file.")
+    db.query(IbsMap).delete()
+    db.bulk_insert_mappings(IbsMap, [{"doc_number": k, "ibs_raw": v} for k, v in pairs.items()])
+    db.commit()
+    return len(pairs)
+
+
 def import_item_receipts(db: Session, data: bytes, filename: str) -> NsSnapshot:
     rows = _rows(data, filename)
     header = next(rows, None)
@@ -71,7 +92,8 @@ def import_item_receipts(db: Session, data: bytes, filename: str) -> NsSnapshot:
             if o in names:
                 idx[field] = names.index(o)
                 break
-    missing = [COLUMNS[f][0] for f in ("doc", "freight", "customs", "ibs") if f not in idx]
+    ibs_map = {m.doc_number: m.ibs_raw for m in db.query(IbsMap)}
+    missing = [COLUMNS[f][0] for f in ("doc", "freight", "customs") + (() if ibs_map else ("ibs",)) if f not in idx]
     if missing:
         raise ReportError("Missing column(s): " + ", ".join(missing) + ". Found: " + ", ".join(n for n in names if n))
 
@@ -87,7 +109,9 @@ def import_item_receipts(db: Session, data: bytes, filename: str) -> NsSnapshot:
             continue                                   # 'Overall Total' and blank rows
         n += 1
         raw = str(get("ibs") or "").strip()
-        if get("ibs") is None:
+        if raw.upper() in NO_IBS_MARKERS and doc in ibs_map:
+            raw = ibs_map[doc]                      # fall back to the receipt -> shipment lookup report
+        if not raw:
             blank_ibs += 1
         value, freight, customs, when = _f(get("value")), _f(get("freight")), _f(get("customs")), _d(get("date"))
         po = str(get("po") or "").strip() or None
@@ -113,8 +137,8 @@ def import_item_receipts(db: Session, data: bytes, filename: str) -> NsSnapshot:
             a["last_date"] = max(a["last_date"] or when, when)
     if n and blank_ibs == n:
         db.rollback()
-        raise ReportError("The IBS column has no values. It is a lookup formula: open the file in Excel, "
-                          "let it calculate, and save again (or paste the column as values).")
+        raise ReportError("No shipment IDs found. The IBS column is a lookup formula with no saved values: open the file "
+                          "in Excel, let it calculate and save again, or upload the receipt-to-shipment lookup report first.")
     snap.row_count = n
     db.bulk_insert_mappings(ItemReceipt, receipts)
     for a in agg.values():

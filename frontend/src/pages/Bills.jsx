@@ -4,6 +4,8 @@ import { api, money } from "../api.js";
 const STATUS = { queued: "Reading…", parsed: "Read and tied", needs_review: "Needs review", unknown_format: "Unknown layout", failed: "Failed", duplicate: "Duplicate" };
 const cls = { parsed: "tag ok", needs_review: "tag bad", unknown_format: "tag bad", failed: "tag bad", duplicate: "tag warn", queued: "tag" };
 
+const ITEMS = { reading: ["Reading… (minutes)", "tag"], tied: ["Read and tied", "tag ok"], not_tied: ["Does not tie", "tag bad"], failed: ["Failed", "tag bad"], none: ["None attached", "tag"] };
+
 export default function Bills({ me }) {
   const [bills, setBills] = useState(null);
   const [log, setLog] = useState([]);
@@ -14,8 +16,8 @@ export default function Bills({ me }) {
   const load = () => api.get("/bills").then(setBills).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, []);
   useEffect(() => {
-    if (!bills || !bills.some((b) => b.status === "queued")) return;
-    const t = setTimeout(load, 2000);
+    if (!bills || !bills.some((b) => b.status === "queued" || b.items_status === "reading")) return;
+    const t = setTimeout(load, 3000);
     return () => clearTimeout(t);
   }, [bills]);
 
@@ -45,14 +47,15 @@ export default function Bills({ me }) {
         <h2>Bills</h2>
         {!bills ? <p className="muted">Loading…</p> : bills.length === 0 ? <p className="muted">No bills uploaded yet.</p> : (
           <table>
-            <thead><tr><th>Invoice</th><th>Forwarder</th><th>Date</th><th>Shipment ID</th><th className="num">Printed total</th><th>Status</th><th>Read by</th></tr></thead>
+            <thead><tr><th>Invoice</th><th>Forwarder</th><th>Date</th><th>Shipment ID</th><th className="num">Printed total</th><th>Status</th><th>SKU lines</th><th>Read by</th></tr></thead>
             <tbody>{bills.map((b) => (
               <tr key={b.id} className="click" onClick={() => setOpen(b.id)}>
                 <td>{b.invoice_no || <span className="muted">{b.file_name}</span>}</td><td>{b.vendor || "—"}</td><td>{b.invoice_date || "—"}</td>
                 <td>{b.shipment_id || (b.shipment_id_raw ? <span className="neg">{b.shipment_id_raw} (not in NetSuite)</span> : <span className="neg">none</span>)}
                   {b.match_method && !["exact", "none"].includes(b.match_method) && <span className="tag warn">{b.match_method}</span>}</td>
                 <td className="num">{money(b.subtotal)}</td>
-                <td><span className={cls[b.status]}>{STATUS[b.status] || b.status}</span></td><td>{b.parse_method || "—"}</td>
+                <td><span className={cls[b.status]}>{STATUS[b.status] || b.status}</span></td>
+                <td>{ITEMS[b.items_status] ? <span className={ITEMS[b.items_status][1]}>{ITEMS[b.items_status][0]}</span> : "—"}</td><td>{b.parse_method || "—"}</td>
               </tr>))}</tbody>
           </table>)}
       </section>

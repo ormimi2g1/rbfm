@@ -9,6 +9,7 @@ export default function Setup({ me }) {
   const [alias, setAlias] = useState({ written: "", means: "" });
   const [rule, setRule] = useState({ pattern: "", bucket: "customs" });
   const file = useRef();
+  const mapFile = useRef();
   const load = () => api.get("/config").then(setCfg);
   useEffect(() => { load(); }, []);
   const run = async (fn) => { setErr(""); setMsg(""); setBusy(true); try { await fn(); await load(); } catch (e) { setErr(e.message); } setBusy(false); };
@@ -30,6 +31,13 @@ export default function Setup({ me }) {
             const r = await api.post("/netsuite/sync"); setMsg(`Synced ${r.shipments} shipments from NetSuite.`);
           })}>Sync from NetSuite API</button>
         </div>
+        <p className="note">If the report has no IBS column, first load the receipt-to-shipment lookup report (columns: shipment ID, IR#):{" "}
+          <input ref={mapFile} type="file" accept=".xlsx,.csv" disabled={busy} />{" "}
+          <button disabled={busy} onClick={() => run(async () => {
+            if (!mapFile.current.files.length) throw new Error("Choose a file first");
+            const r = await api.upload("/netsuite/ibs-map", "file", [mapFile.current.files[0]]);
+            setMsg(`Loaded ${r.receipts.toLocaleString()} receipt-to-shipment links. They apply the next time a report is loaded.`);
+          })}>Load lookup</button></p>
         {!me.netsuite_api && <p className="note">API sync is off until NS_ACCOUNT_ID, NS_CLIENT_ID, NS_CERT_ID, NS_PRIVATE_KEY and NS_SHIPMENT_ID_FIELD are set.</p>}
         {busy && <p className="muted">Working…</p>}{msg && <p className="okline">{msg}</p>}{err && <p className="error">{err}</p>}
       </section>

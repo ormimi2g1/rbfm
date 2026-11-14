@@ -137,6 +137,15 @@ async def upload_report(file: UploadFile = File(...), db: Session = Depends(get_
     return {"rows": snap.row_count, "receipts_without_ibs": snap.no_ibs_rows}
 
 
+@app.post("/api/netsuite/ibs-map", dependencies=[Depends(auth)])
+async def upload_ibs_map(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        n = reports.import_ibs_map(db, await file.read(), file.filename or "map.xlsx")
+    except reports.ReportError as e:
+        raise HTTPException(400, str(e))
+    return {"receipts": n}
+
+
 @app.post("/api/netsuite/sync", dependencies=[Depends(auth)])
 def netsuite_sync(db: Session = Depends(get_db)):
     if not suiteql.configured():
@@ -175,6 +184,21 @@ def get_shipment(sid: str, db: Session = Depends(get_db)):
     if not s:
         raise HTTPException(404, "Shipment not found")
     return s
+
+
+@app.get("/api/shipments/{sid}/sku.csv", dependencies=[Depends(auth)])
+def shipment_sku_csv(sid: str, db: Session = Depends(get_db)):
+    s = recon.shipment_detail(db, ids.normalise(sid))
+    if not s or not s["sku_lines"]:
+        raise HTTPException(404, "No SKU lines for this shipment")
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(export.SKU_HEADERS)
+    w.writerows(export.sku_rows(s))
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{s["shipment_id"]}_sku_variance.csv"'})
 
 
 @app.get("/api/id-issues", dependencies=[Depends(auth)])

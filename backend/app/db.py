@@ -25,8 +25,22 @@ def get_db():
         db.close()
 
 
+def _add_missing_columns():
+    """create_all() never alters an existing table; add columns introduced later."""
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    for table in Base.metadata.sorted_tables:
+        have = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name not in have and col.nullable and not col.primary_key:
+                ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {col.type.compile(engine.dialect)}'
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+
+
 def init_db():
     from . import models, buckets  # noqa: F401
     Base.metadata.create_all(engine)
+    _add_missing_columns()
     with SessionLocal() as db:
         buckets.seed_defaults(db)

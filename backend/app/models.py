@@ -48,6 +48,10 @@ class Bill(Base):
     excluded: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    # SKU lines from the broker's Invoice Lines Report attached to the bill
+    items_status: Mapped[str | None] = mapped_column(String(20))        # reading | tied | not_tied | none | failed
+    items_printed_total: Mapped[float | None] = mapped_column(Float)
+    items: Mapped[list["BillItemLine"]] = relationship(cascade="all, delete-orphan", order_by="BillItemLine.line_no")
     charges: Mapped[list["BillCharge"]] = relationship(back_populates="bill", cascade="all, delete-orphan", order_by="BillCharge.line_no")
 
 
@@ -65,6 +69,30 @@ class BillCharge(Base):
     fx: Mapped[float | None] = mapped_column(Float)
     total_usd: Mapped[float] = mapped_column(Float)
     bill: Mapped[Bill] = relationship(back_populates="charges")
+
+
+class BillItemLine(Base):
+    __tablename__ = "bill_item_line"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bill_id: Mapped[int] = mapped_column(ForeignKey("bill.id", ondelete="CASCADE"), index=True)
+    line_no: Mapped[int] = mapped_column(Integer)
+    page: Mapped[int | None] = mapped_column(Integer)
+    sku: Mapped[str] = mapped_column(String(60), index=True)
+    description: Mapped[str | None] = mapped_column(String(200))
+    qty: Mapped[float | None] = mapped_column(Float)
+    value_usd: Mapped[float | None] = mapped_column(Float)
+    hts: Mapped[str | None] = mapped_column(String(20))
+    duty_rate: Mapped[str | None] = mapped_column(String(12))
+    component: Mapped[bool] = mapped_column(Boolean, default=False)   # extra customs line of the SKU above
+    note: Mapped[str | None] = mapped_column(String(200))
+
+
+class IbsMap(Base):
+    """Item receipt -> shipment ID, from the NetSuite lookup report. Used when the
+    item-receipt report itself carries no shipment ID."""
+    __tablename__ = "ibs_map"
+    doc_number: Mapped[str] = mapped_column(String(40), primary_key=True)
+    ibs_raw: Mapped[str] = mapped_column(String(80))
 
 
 class NsSnapshot(Base):

@@ -17,12 +17,13 @@ inconsistently, bills that do not belong to any shipment.
 |---|---|
 | Bill intake | Upload PDFs or zips of PDFs. Each bill is read, and only accepted as "read and tied" when its charge lines add up to the printed total (±$0.02). The PDF is discarded after reading; only structured fields are kept. |
 | Readers | Layout rules for C.H. Robinson (verified on real bills), Crane Worldwide and Expeditors (written from a layout description, **not yet verified on real bills**). Anything else, or anything that does not tie, goes to an OpenAI reader if `OPENAI_API_KEY` is set, with personal details and bank lines stripped first. Scanned first pages go through OCR. |
-| NetSuite data | Two interchangeable paths: upload the item-receipt report (Excel/CSV), or sync through SuiteQL (**written but not yet run against a live account**). Every load is a snapshot, so landed-cost changes between loads are shown. |
+| NetSuite data | Two interchangeable paths: upload the item-receipt report (Excel/CSV; plus the receipt-to-shipment lookup report if it has no IBS column), or sync through SuiteQL (**written but not yet run against a live account**). Every load is a snapshot, so landed-cost changes between loads are shown. |
 | Matching | Bill → shipment by the shipment ID in the file name (`ShipmentID_INVinvoice.pdf`), normalised for spaces and case. Near-misses are **suggested** (shared PO numbers first, similar spelling second) and only applied when a person confirms. |
 | Variance | Per shipment: NetSuite landed freight − billed freight, customs likewise when a customs bill is loaded. Sign: negative = inventory cost under-stated. |
 | Flags | No landed cost, no landed freight/customs, freight variance, main freight bill missing, mode mismatch, wrong cost category (API path), ID written inconsistently, ID corrected, PO mismatch, bill does not tie, read by AI. |
-| Per-SKU view | Value allocation by style-colour. Needs shipment item lines, which only the API path provides. |
-| Export | Excel workbook: IBS Summary, Awaiting Bills, Bill Register, Bill Charges, ID Issues. |
+| SKU lines | When a C.H. Robinson bill packet carries the broker's "Invoice Lines Report", its SKU lines (product code, size, quantity, invoice value, HTS, duty rate) are read by OCR in the background and must add up to the report's printed Line Total. The shipment's billed and NetSuite-landed freight are then spread over the SKUs by invoice value, so the SKU variances add up exactly to the shipment variance. Download per shipment as CSV, or all in the Excel export. Verified on one real 49-page report (230 lines, tied to the cent). Takes a few minutes per packet. |
+| Per-SKU view from NetSuite | Value allocation by style-colour from NetSuite's own item lines, which only the API path provides. |
+| Export | Excel workbook: IBS Summary, Awaiting Bills, Bill Register, Bill Charges, SKU Variance, ID Issues. |
 
 Not built yet: bill-list (AP export) import and its split AP/COGS handling, run log,
 tie-out to the accrued-freight account, rate benchmarking, alerts, roles.

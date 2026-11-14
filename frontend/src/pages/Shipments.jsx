@@ -39,6 +39,42 @@ export default function Shipments({ selected }) {
   );
 }
 
+function SkuLines({ s }) {
+  const k = s.sku_lines;
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("variance");
+  const rows = k.rows.filter((r) => !q || (r.sku + " " + (r.description || "")).toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (sort === "variance" ? a.variance - b.variance : sort === "sku" ? a.sku.localeCompare(b.sku) : a.lines[0] - b.lines[0]));
+  return (
+    <section>
+      <div className="row">
+        <h2 style={{ margin: 0 }}>Freight variance by SKU</h2>
+        <span className="spacer" />
+        <input placeholder="Search SKU or description" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="variance">Largest variance first</option><option value="sku">SKU</option><option value="line">Report order</option>
+        </select>
+        <a className="btn" href={`/api/shipments/${encodeURIComponent(s.shipment_id)}/sku.csv`}>Download CSV</a>
+      </div>
+      <p>{k.sku_count} SKUs ({k.line_count} lines on the broker's Invoice Lines Report), invoice value {money(k.invoice_value)}.
+        Billed {money(k.billed_freight)} − NetSuite {money(k.ns_freight)} = <b className={k.variance < 0 ? "neg" : ""}>{signed(k.variance)}</b>, spread by invoice value.</p>
+      {!k.final && <p className="warnline">The main freight bill is not loaded yet, so these amounts are not final.</p>}
+      {Math.abs(k.value_gap) > 0.02 && <p className="note">The report's invoice value is {signed(k.value_gap)} against NetSuite's goods value of {money(k.goods_value_netsuite)}.
+        NetSuite's own per-SKU landed amounts can differ slightly from this split until item lines are synced from NetSuite.</p>}
+      <table>
+        <thead><tr><th>SKU</th><th>Description</th><th className="num">Qty</th><th className="num">Invoice value</th><th className="num">Billed freight</th>
+          <th className="num">NetSuite freight</th><th className="num">Variance</th><th className="num">Per unit</th><th>HTS</th><th>Duty</th></tr></thead>
+        <tbody>{rows.map((r) => (
+          <tr key={r.sku}><td>{r.sku}{r.note && <span className="tag warn" title={r.note}>check</span>}</td><td>{r.description}</td><td className="num">{r.qty}</td>
+            <td className="num">{money(r.value)}</td><td className="num">{money(r.billed_freight)}</td><td className="num">{money(r.ns_freight)}</td>
+            <td className={"num " + (r.variance < 0 ? "neg" : "")}>{signed(r.variance)}</td><td className="num">{r.variance_per_unit ?? "—"}</td><td>{r.hts}</td><td>{r.duty_rate}</td></tr>))}</tbody>
+        <tfoot><tr><td colSpan="2"><b>Total ({k.sku_count} SKUs)</b></td><td /><td className="num"><b>{money(k.invoice_value)}</b></td><td className="num"><b>{money(k.billed_freight)}</b></td>
+          <td className="num"><b>{money(k.ns_freight)}</b></td><td className={"num " + (k.variance < 0 ? "neg" : "")}><b>{signed(k.variance)}</b></td><td colSpan="3" /></tr></tfoot>
+      </table>
+    </section>
+  );
+}
+
 function Detail({ sid }) {
   const [s, setS] = useState(null);
   const [err, setErr] = useState("");
@@ -75,6 +111,7 @@ function Detail({ sid }) {
             </table>
           </div>))}
       </section>
+      {s.sku_lines && <SkuLines s={s} />}
       {s.receipts_detail.length > 0 && (
         <section>
           <h2>NetSuite item receipts</h2>

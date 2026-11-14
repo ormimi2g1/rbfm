@@ -69,7 +69,7 @@ def test_end_to_end(client):
     assert "FREIGHT_VAR" not in _ship(client, "2602-ABC-AIR-4")["flags"]
 
     wb = load_workbook(io.BytesIO(client.get("/api/export.xlsx").content))
-    assert wb.sheetnames == ["IBS Summary", "Awaiting Bills", "Bill Register", "Bill Charges", "ID Issues"]
+    assert wb.sheetnames == ["IBS Summary", "Awaiting Bills", "Bill Register", "Bill Charges", "SKU Variance", "ID Issues"]
     assert wb["IBS Summary"].max_row == 3 and wb["Bill Charges"].max_row == 7
 
 

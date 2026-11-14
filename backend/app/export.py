@@ -27,6 +27,16 @@ def _sheet(wb, title, headers, rows, money_cols=()):
     return ws
 
 
+SKU_HEADERS = ["Shipment ID", "SKU", "Description", "Qty", "Invoice Value", "Billed Freight", "NS LC Freight", "Freight Var",
+               "Freight Var / Unit", "HTS", "Duty Rate", "Report Lines", "PDF Pages", "Notes"]
+
+
+def sku_rows(s: dict) -> list[list]:
+    return [[s["shipment_id"], r["sku"], r["description"], r["qty"], r["value"], r["billed_freight"], r["ns_freight"], r["variance"],
+             r["variance_per_unit"], r["hts"], r["duty_rate"], ", ".join(map(str, r["lines"])), ", ".join(map(str, r["pages"])),
+             r["note"]] for r in s["sku_lines"]["rows"]]
+
+
 def build(db: Session) -> bytes:
     state = recon.build(db)
     wb = Workbook()
@@ -55,6 +65,12 @@ def build(db: Session) -> bytes:
            ["Invoice", "Shipment ID", "Line", "PDF Page", "Description", "Type", "Units", "Currency", "Rate", "FX", "Total USD", "Bucket"],
            [[b["invoice_no"], b.get("shipment_id"), c["line_no"], c["page"], c["description"], c["rate_type"], c["units"],
              c["currency"], c["rate"], c["fx"], c["total_usd"], c["bucket"]] for b in state["bills"] if not b["excluded"] for c in b["charges"]], M)
+    sku = []
+    for s in ships:
+        d = recon.shipment_detail(db, s["shipment_id"])
+        if d and d["sku_lines"]:
+            sku += sku_rows(d)
+    _sheet(wb, "SKU Variance", SKU_HEADERS, sku, M + ("Invoice Value", "Billed Freight"))
     issues = recon.id_issues(db)
     _sheet(wb, "ID Issues", ["Shipment ID", "Written As", "Issues", "Receipts", "NS LC Freight"],
            [[i["shipment_id"], " | ".join(i["written_as"]), "; ".join(i["issues"]), i["receipts"], i["ns_freight"]] for i in issues["netsuite_ids"]], M)

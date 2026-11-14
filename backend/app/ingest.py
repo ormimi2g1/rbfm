@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from . import config, ids, parsers
 from .db import SessionLocal
-from .models import Bill, BillCharge
+from .models import Bill, BillCharge, BillItemLine
+from .parsers import invoice_lines
 
 REBILL_RE = re.compile(r"^(\w+?)\s*-\s*\d{1,2}$")
 
@@ -116,9 +117,33 @@ def process(bill_ids: list[int]):
             except Exception as e:
                 bill.status = "failed"
                 bill.warnings = [f"Could not read this PDF ({type(e).__name__})"]
+            db.commit()                      # the bill is usable now; SKU lines can take minutes
+            try:
+                read_item_lines(db, bill, path)
+            except Exception as e:
+                bill.items_status = "failed"
+                bill.warnings = list(bill.warnings or []) + [f"SKU lines could not be read ({type(e).__name__})"]
             finally:
                 path.unlink(missing_ok=True)
             db.commit()
+
+
+def read_item_lines(db: Session, bill: Bill, path):
+    """Read the attached Invoice Lines Report (if any) into SKU lines."""
+    if bill.status not in ("parsed", "needs_review") or not invoice_lines.OCR_OK:
+        return
+    bill.items_status = "reading"
+    db.commit()
+    res = invoice_lines.extract(path, start_page=config.PARSE_PAGES - 2)
+    if res is None:
+        bill.items_status = "none"
+        return
+    bill.items = [BillItemLine(line_no=l.line_no, page=l.page, sku=l.sku[:60], description=l.description, qty=l.qty,
+                               value_usd=l.value_usd, hts=l.hts, duty_rate=l.duty_rate, component=l.component, note=l.note)
+                  for l in res.lines]
+    bill.items_printed_total = res.printed_total
+    bill.items_status = "tied" if res.tied() else ("not_tied" if res.lines else "failed")
+    bill.warnings = list(bill.warnings or []) + res.warnings
 
 
 def requeue_orphans():
