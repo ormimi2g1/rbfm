@@ -42,8 +42,12 @@ def extract_pages(path: str | Path, max_pages: int = 4) -> tuple[list[list[str]]
     with pdfplumber.open(str(path)) as pdf:
         for i, page in enumerate(pdf.pages[:max_pages]):
             words = page.extract_words(x_tolerance=2, y_tolerance=2)
+            # sideways margin text (terms printed up the page edge) otherwise lands
+            # reversed in the middle of charge lines: "DNA MANIFEST FEE"
+            n_words = len(words)
+            words = [w for w in words if w.get("upright", True)]
             lines = _lines_from_words(words)
-            if len(words) < 25 and i == 0:      # first page is a scan
+            if n_words < 25 and i == 0:         # first page is a scan
                 ocr = _ocr_page(page)
                 if ocr:
                     lines, used_ocr = ocr, True

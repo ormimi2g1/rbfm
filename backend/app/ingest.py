@@ -132,6 +132,9 @@ def read_item_lines(db: Session, bill: Bill, path):
     """Read the attached Invoice Lines Report (if any) into SKU lines."""
     if bill.status not in ("parsed", "needs_review") or not invoice_lines.OCR_OK:
         return
+    if bill.vendor != "C.H. Robinson":       # only their packets carry the Invoice Lines Report
+        bill.items_status = "none"
+        return
     bill.items_status = "reading"
     db.commit()
     res = invoice_lines.extract(path, start_page=config.PARSE_PAGES - 2)

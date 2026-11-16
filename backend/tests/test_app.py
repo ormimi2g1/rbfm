@@ -33,6 +33,8 @@ def test_end_to_end(client):
     assert s["status"] == "matched" and s["actual_freight"] == 1300.00 and s["ns_freight"] == 1000.00
     assert s["freight_var"] == -300.00 and "FREIGHT_VAR" in s["flags"] and len(s["receipts_detail"]) == 2
     assert s["bills"][0]["charges"][0]["bucket"] == "freight" and s["bills"][0]["match_method"] == "exact"
+    check = client.get("/api/bills").json()[0]["ns_check"]          # the bill reads fine, but NetSuite disagrees
+    assert check["state"] == "review" and check["flags"] == ["FREIGHT_VAR"] and check["freight_var"] == -300.00
 
     # same file again is skipped; same invoice in a different file is not counted twice
     _upload(client, "copy of 6200000001.pdf", make_pdf(chr_lines()))

@@ -16,7 +16,8 @@ DEFAULT_RULES = [
     (r"duty management fee", "broker_fee"),
 ]
 DEFAULT_SETTINGS = {"variance_abs": "1.00", "variance_pct": "2.0"}
-MAIN_FREIGHT_RE = re.compile(r"\b(air|ocean|sea)\s*freight\b", re.I)
+# a bill carrying the transport charge itself, as opposed to only drayage/storage/fees
+MAIN_FREIGHT_RE = re.compile(r"\bfreight\b|\b(LCL|FCL)\b", re.I)
 
 
 def seed_defaults(db: Session):

@@ -32,6 +32,9 @@ FLAG_TEXT = {
 }
 
 
+REVIEW_FLAGS = ("FREIGHT_VAR", "NO_LC", "NO_FREIGHT_LINE", "NO_CUSTOMS_LINE", "MODE_MISMATCH", "PO_MISMATCH", "BILL_NOT_TIED")
+
+
 def _r(x) -> float:
     return round(float(x or 0), 2)
 
@@ -149,6 +152,21 @@ def build(db: Session) -> dict:
             flags.append("ID_FORMAT")
         s["flags"] = sorted(set(flags))
         shipments.append(s)
+
+    # each bill also carries the verdict of its shipment, so the Bills page answers
+    # "does this bill agree with NetSuite?" and not only "was the PDF read correctly?"
+    by_id = {s["shipment_id"]: s for s in shipments}
+    for v in all_bills:
+        s = by_id.get(v.get("shipment_id") or "")
+        if v["status"] not in COUNTED or v["excluded"]:
+            v["ns_check"] = None
+        elif not s:
+            v["ns_check"] = {"state": "unmatched"}
+        else:
+            problems = [f for f in s["flags"] if f in REVIEW_FLAGS]
+            state = "review" if problems else ("not_final" if s["status"] == "partial" else "ok")
+            v["ns_check"] = {"state": state, "flags": problems, "freight_var": s["freight_var"], "freight_var_pct": s["freight_var_pct"],
+                             "actual_freight": s["actual_freight"], "ns_freight": s["ns_freight"], "bills_on_shipment": s["bill_count"]}
 
     return {"snapshot": snap, "shipments": shipments, "unmatched_bills": unmatched, "bills": all_bills,
             "thresholds": {"variance_abs": abs_thr, "variance_pct": pct_thr}}

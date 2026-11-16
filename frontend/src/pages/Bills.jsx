@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { api, money } from "../api.js";
+import { api, money, signed, pct, FLAGS } from "../api.js";
 
-const STATUS = { queued: "Reading…", parsed: "Read and tied", needs_review: "Needs review", unknown_format: "Unknown layout", failed: "Failed", duplicate: "Duplicate" };
+const STATUS = { queued: "Reading…", parsed: "Read OK", needs_review: "Needs review", unknown_format: "Unknown layout", failed: "Failed", duplicate: "Duplicate" };
 const cls = { parsed: "tag ok", needs_review: "tag bad", unknown_format: "tag bad", failed: "tag bad", duplicate: "tag warn", queued: "tag" };
 
-const ITEMS = { reading: ["Reading… (minutes)", "tag"], tied: ["Read and tied", "tag ok"], not_tied: ["Does not tie", "tag bad"], failed: ["Failed", "tag bad"], none: ["None attached", "tag"] };
+const ITEMS = { reading: ["Reading… (minutes)", "tag"], tied: ["Read OK", "tag ok"], not_tied: ["Does not tie", "tag bad"], failed: ["Failed", "tag bad"], none: ["None attached", "tag"] };
 
 export default function Bills({ me }) {
   const [bills, setBills] = useState(null);
@@ -47,7 +47,7 @@ export default function Bills({ me }) {
         <h2>Bills</h2>
         {!bills ? <p className="muted">Loading…</p> : bills.length === 0 ? <p className="muted">No bills uploaded yet.</p> : (
           <table>
-            <thead><tr><th>Invoice</th><th>Forwarder</th><th>Date</th><th>Shipment ID</th><th className="num">Printed total</th><th>Status</th><th>SKU lines</th><th>Read by</th></tr></thead>
+            <thead><tr><th>Invoice</th><th>Forwarder</th><th>Date</th><th>Shipment ID</th><th className="num">Printed total</th><th title="Was the PDF read correctly: do its lines add up to its printed total?">PDF reading</th><th title="Does the shipment's billed freight agree with NetSuite landed freight?">Against NetSuite</th><th>SKU lines</th><th>Read by</th></tr></thead>
             <tbody>{bills.map((b) => (
               <tr key={b.id} className="click" onClick={() => setOpen(b.id)}>
                 <td>{b.invoice_no || <span className="muted">{b.file_name}</span>}</td><td>{b.vendor || "—"}</td><td>{b.invoice_date || "—"}</td>
@@ -55,6 +55,7 @@ export default function Bills({ me }) {
                   {b.match_method && !["exact", "none"].includes(b.match_method) && <span className="tag warn">{b.match_method}</span>}</td>
                 <td className="num">{money(b.subtotal)}</td>
                 <td><span className={cls[b.status]}>{STATUS[b.status] || b.status}</span></td>
+                <td><NsCheck c={b.ns_check} /></td>
                 <td>{ITEMS[b.items_status] ? <span className={ITEMS[b.items_status][1]}>{ITEMS[b.items_status][0]}</span> : "—"}</td><td>{b.parse_method || "—"}</td>
               </tr>))}</tbody>
           </table>)}
@@ -62,6 +63,15 @@ export default function Bills({ me }) {
       {open && <BillPanel id={open} onClose={() => { setOpen(null); load(); }} />}
     </>
   );
+}
+
+function NsCheck({ c }) {
+  if (!c) return "—";
+  if (c.state === "unmatched") return <span className="tag bad">No shipment matched</span>;
+  if (c.state === "not_final") return <span className="tag warn">Not final: main freight bill missing</span>;
+  if (c.state === "ok") return <span className="tag ok">Agrees with NetSuite</span>;
+  const onlyVar = c.flags.includes("FREIGHT_VAR");
+  return <span className="tag bad">Review: {onlyVar ? `variance ${signed(c.freight_var)} (${pct(c.freight_var_pct)})` : c.flags.map((f) => FLAGS[f] || f).join(", ")}</span>;
 }
 
 function BillPanel({ id, onClose }) {
@@ -78,6 +88,8 @@ function BillPanel({ id, onClose }) {
         <h2>{b.vendor || "Bill"} {b.invoice_no}</h2>
         <p className="muted">{b.file_name}</p>
         <dl>
+          <dt>Against NetSuite</dt><dd><NsCheck c={b.ns_check} />{b.ns_check && b.ns_check.ns_freight != null && b.shipment_id && (
+            <> billed {money(b.ns_check.actual_freight)} on {b.ns_check.bills_on_shipment} bill{b.ns_check.bills_on_shipment === 1 ? "" : "s"}, NetSuite {money(b.ns_check.ns_freight)}. <a href={`#/shipments/${encodeURIComponent(b.shipment_id)}`}>Open shipment</a></>)}</dd>
           <dt>Printed total</dt><dd>{money(b.subtotal)}</dd>
           <dt>Lines add to</dt><dd className={b.tied ? "" : "neg"}>{money(b.lines_total)} {b.tied ? "(ties)" : "(does not tie)"}</dd>
           <dt>Mode</dt><dd>{b.mode || "—"}</dd>

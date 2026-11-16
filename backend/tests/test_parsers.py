@@ -38,18 +38,68 @@ def test_crane_from_spec_description():
              "Total - US Dollar: SIX THOUSAND ... USD 6,487.50"]
     b = crane.parse([lines])
     assert b.invoice_no == "IAIDFW250900001" and b.mode == "AIR" and len(b.charges) == 3 and b.tied()
+    ocean = crane.parse([["Crane Worldwide Logistics", "LLC Date : 10/30/2026 Page : 1 / 1", "Invoice No. : ISIDFW260100001 /",
+                          "Attn: Jane Doe Job No. : HSI0001", "BL / AWB No. : MLCW0001", "Port of Loading : X C.Wgt/M3/KT : 15.800 CBM",
+                          "Destination : DFW Service Level: LCL Ocean Freight", "Description Rate Quantity Tax Amount", "ORIGINAL",
+                          "Less Than Container Freight (LCL) 297.000 15.800 CBM 4,692.60",
+                          "Customs Participating Government Agency 69.000 1.000 SHP 69.00", "(PGA) Fee",
+                          "Destination Handling Fee 110.000 1.000 SHP 110.00",
+                          "Total - US Dollar:FOUR THOUSAND ... ONLY USD 4,871.60", "Prepared By: Jane Doe"],
+                         ["INVOICE", "PO009043 Some Style 300 3.800 1140.00"]])            # supplier invoice page is ignored
+    assert ocean.mode == "OCEAN" and ocean.tied() and len(ocean.charges) == 3 and str(ocean.invoice_date) == "2026-10-30"
+    assert ocean.charges[1].description.endswith("(PGA) Fee") and ocean.weight_uom == "CBM"
     brokerage = crane.parse([["Crane Worldwide", "Invoice No. : 5700001", "ENTRY FEE 137.500 1.000 SHP 137.50",
                               "Duties and Fees of $6,100.25 will be debited from your ACH account",
                               "Total - US Dollar: USD 137.50"]])
     assert brokerage.stated_customs == 6100.25 and brokerage.tied()
 
 
-def test_expeditors_from_spec_description():
-    lines = ["EXPEDITORS", "INVOICE NUMBER E930000001", "AWB/BL 1234567890", "ORIGINAL 03/01/26", "AIR FREIGHT 2,879.00",
-             "HANDLING 421.11", "DUTY BY CLIENT USD 1,950.40", "SUB TOTAL: 3,300.11", "INVOICE TOTAL: 3,300.11 USD"]
-    b = expeditors.parse([lines])
-    assert b.invoice_no == "E930000001" and b.tied() and b.subtotal == 3300.11
+EXPEDITORS_LINES = [      # the real layout, made-up values; "ORIGINAL" is printed at the very end
+    "REMIT TO", "EXPEDITORS INT'L OF WA INC", "506 EAST SOME ROAD, STE 400", "CLIENT NO: G0000001 INVOICE 03/01/26", "DATE",
+    "Some Importer LLC", "1 Main Pkwy INVOICE E230000001", "NUMBER", "YOUR", "PO009043", "REFERENCE",
+    "AWB/BL: ABCD1234567 HAWB/HBL: 62G0000001 ARRIVAL: 03/01/26", "CARRIER: SOME VESSEL CUSTOMS#: 231-0000000-0",
+    "PCS: 18PCS WEIGHT: 161.0K", "DUTY BY CLIENT USD 1,950.40", "THROUGH ABI VIA ACH ON 04/01/26",
+    "HBL FREIGHT MINIMUM 170.00", "MANIFEST FEE 35.00", "CUSTOMS ENTRY FEE 95.00", "LOCAL DELIVERY 351.00",
+    "SUB TOTAL: 651.00", "INVOICE TOTAL: 651.00 USD", "SERVICE LEVEL: CFS to CFS", "CO ABCU1234567 18 40H",
+    "Routing No.: 121000248 Routing No.: 121000248", "ORIGINAL"]
+
+
+def test_expeditors_real_layout():
+    emails = ["From: Jane Doe <jane@example.com>", "LTL: $351", "TOTAL DUE 999.00"]      # attached pages are ignored
+    b = expeditors.parse([EXPEDITORS_LINES, emails])
+    assert b.invoice_no == "E230000001" and str(b.invoice_date) == "2026-03-01" and b.mode == "OCEAN"
+    assert [c.total_usd for c in b.charges] == [170.0, 35.0, 95.0, 351.0] and b.tied() and b.subtotal == 651.0
     assert b.stated_customs == 1950.40 and all("DUTY" not in c.description for c in b.charges)
+    assert b.po_refs == ["PO009043"] and b.hawb == "62G0000001" and b.chargeable_weight == 161.0
+
+
+def test_sideways_margin_text_is_ignored(tmp_path):
+    import io
+    from reportlab.pdfgen import canvas
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(612, 792))
+    c.setFont("Helvetica", 8)
+    c.drawString(60, 700, "MANIFEST FEE 35.00")
+    for n in range(8):
+        c.drawString(60, 600 - 14 * n, f"FILLER LINE NUMBER {n} OF EIGHT")
+    c.saveState()
+    c.translate(40, 690)
+    c.rotate(90)
+    c.drawString(0, 0, "TERMS AND CONDITIONS")
+    c.restoreState()
+    c.save()
+    p = tmp_path / "m.pdf"
+    p.write_bytes(buf.getvalue())
+    pages, _ = pdftext.extract_pages(p)
+    assert pages[0][0] == "MANIFEST FEE 35.00" and len(pages[0]) == 9 and not any("TERMS" in ln for ln in pages[0])
+
+
+def test_main_freight_is_recognised_under_forwarder_wordings():
+    from app.buckets import MAIN_FREIGHT_RE
+    for d in ("Air Freight", "Ocean Freight", "HBL FREIGHT MINIMUM", "Less Than Container Freight (LCL)", "FCL 40HC"):
+        assert MAIN_FREIGHT_RE.search(d), d
+    for d in ("Dray to Yard", "Storage @ Yard", "Customs Entry Fee", "Destination Terminal Handling Fee"):
+        assert not MAIN_FREIGHT_RE.search(d), d
 
 
 def test_redaction_keeps_invoice_numbers_but_drops_people():
